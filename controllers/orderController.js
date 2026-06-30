@@ -1,4 +1,4 @@
-const Order = require("../models/Order");
+const Order   = require("../models/Order");
 const Product = require("../models/Product");
 
 // @route  POST /api/orders
@@ -8,47 +8,76 @@ const createOrder = async (req, res) => {
   try {
     const { items, shippingAddress } = req.body;
 
-    if (!items || items.length === 0) {
+    // Validate input — log what was received so Render logs show the issue
+    if (!items || !Array.isArray(items) || items.length === 0) {
+      console.error("ORDER_CREATE_ERROR: No items in request body.", { body: req.body });
       return res.status(400).json({ message: "No order items provided" });
     }
 
-    // Validate each item and calculate total
-    let totalAmount = 0;
+    let totalAmount    = 0;
     const resolvedItems = [];
 
+    // Phase 1 — validate ALL items and collect stock updates before saving anything
+    // This prevents partial stock reduction if one item fails mid-loop
+    const stockUpdates = []; // hold products to update after full validation
+
     for (const item of items) {
+      if (!item.product || !item.quantity) {
+        return res.status(400).json({
+          message: "Each item must have product ID and quantity",
+          received: item,
+        });
+      }
+
       const product = await Product.findById(item.product);
       if (!product) {
         return res.status(404).json({ message: `Product not found: ${item.product}` });
       }
       if (product.stock < item.quantity) {
-        return res.status(400).json({ message: `Insufficient stock for: ${product.name}` });
+        return res.status(400).json({
+          message: `Insufficient stock for: ${product.name}`,
+          available: product.stock,
+          requested: item.quantity,
+        });
       }
 
       resolvedItems.push({
-        product: product._id,
-        name: product.name,
-        price: product.price,
-        quantity: item.quantity,
+        product:  product._id,
+        name:     product.name,
+        price:    product.price,
+        quantity: Number(item.quantity),
       });
 
-      totalAmount += product.price * item.quantity;
-
-      // Reduce stock
-      product.stock -= item.quantity;
-      await product.save();
+      totalAmount += product.price * Number(item.quantity);
+      stockUpdates.push({ product, quantity: Number(item.quantity) });
     }
 
+    // Phase 2 — reduce stock (all validations passed)
+    for (const { product, quantity } of stockUpdates) {
+      product.stock -= quantity;
+      await product.save(); // awaited correctly — no fire-and-forget
+    }
+
+    // Phase 3 — create the order document
     const order = await Order.create({
-      user: req.user._id,
-      items: resolvedItems,
+      user:            req.user._id,
+      items:           resolvedItems,
       totalAmount,
       shippingAddress: shippingAddress || "",
     });
 
     res.status(201).json(order);
   } catch (error) {
-    res.status(500).json({ message: error.message });
+    // Full error — Mongoose validation errors have detail in error.errors
+    console.error("DATABASE_SAVE_ERROR:", JSON.stringify(error, null, 2));
+    res.status(500).json({
+      message: error.message,
+      errors: error.errors
+        ? Object.fromEntries(
+            Object.entries(error.errors).map(([k, v]) => [k, v.message])
+          )
+        : undefined,
+    });
   }
 };
 
@@ -62,6 +91,7 @@ const getMyOrders = async (req, res) => {
 
     res.status(200).json(orders);
   } catch (error) {
+    console.error("DATABASE_SAVE_ERROR:", JSON.stringify(error, null, 2));
     res.status(500).json({ message: error.message });
   }
 };
@@ -77,6 +107,7 @@ const getAllOrders = async (req, res) => {
 
     res.status(200).json(orders);
   } catch (error) {
+    console.error("DATABASE_SAVE_ERROR:", JSON.stringify(error, null, 2));
     res.status(500).json({ message: error.message });
   }
 };
@@ -87,13 +118,18 @@ const updateOrderStatus = async (req, res) => {
   try {
     const { status, paymentStatus } = req.body;
 
+    const update = {};
+    if (status)        update.status        = status;
+    if (paymentStatus) update.paymentStatus = paymentStatus;
+
+    if (Object.keys(update).length === 0) {
+      return res.status(400).json({ message: "No status fields provided" });
+    }
+
     const order = await Order.findByIdAndUpdate(
       req.params.id,
-      {
-        ...(status && { status }),
-        ...(paymentStatus && { paymentStatus }),
-      },
-      { new: true }
+      update,
+      { new: true, runValidators: true }
     ).populate("user", "name email");
 
     if (!order) {
@@ -102,6 +138,7 @@ const updateOrderStatus = async (req, res) => {
 
     res.status(200).json(order);
   } catch (error) {
+    console.error("DATABASE_SAVE_ERROR:", JSON.stringify(error, null, 2));
     res.status(500).json({ message: error.message });
   }
 };
@@ -116,15 +153,15 @@ const getSalesByCategory = async (req, res) => {
       {
         $group: {
           _id: "$items.name",
-          totalSales: { $sum: { $multiply: ["$items.price", "$items.quantity"] } },
-          orderCount: { $sum: 1 },
+          totalSales:  { $sum: { $multiply: ["$items.price", "$items.quantity"] } },
+          orderCount:  { $sum: 1 },
         },
       },
       { $sort: { totalSales: -1 } },
       {
         $project: {
           _id: 0,
-          product: "$_id",
+          product:    "$_id",
           totalSales: { $round: ["$totalSales", 2] },
           orderCount: 1,
         },
@@ -133,8 +170,15 @@ const getSalesByCategory = async (req, res) => {
 
     res.status(200).json({ success: true, count: salesData.length, data: salesData });
   } catch (error) {
+    console.error("DATABASE_SAVE_ERROR:", JSON.stringify(error, null, 2));
     res.status(500).json({ message: error.message });
   }
 };
 
-module.exports = { createOrder, getMyOrders, getAllOrders, updateOrderStatus, getSalesByCategory };
+module.exports = {
+  createOrder,
+  getMyOrders,
+  getAllOrders,
+  updateOrderStatus,
+  getSalesByCategory,
+};

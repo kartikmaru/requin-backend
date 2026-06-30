@@ -34,6 +34,7 @@ const register = async (req, res) => {
       token: generateToken(user._id),
     });
   } catch (error) {
+    console.error("DATABASE_SAVE_ERROR:", JSON.stringify(error, null, 2));
     res.status(500).json({ message: error.message });
   }
 };
@@ -63,6 +64,7 @@ const login = async (req, res) => {
       token: generateToken(user._id),
     });
   } catch (error) {
+    console.error("DATABASE_SAVE_ERROR:", JSON.stringify(error, null, 2));
     res.status(500).json({ message: error.message });
   }
 };
