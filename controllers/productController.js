@@ -1,43 +1,57 @@
 const Product = require("../models/Product");
 
+// ─────────────────────────────────────────────────────────────────────────────
+// SCHEMA REQUIRED FIELDS AUDIT (Product.js):
+//   name        → required ✅  frontend sends: "name"
+//   description → required ✅  frontend sends: "description"
+//   price       → required ✅  frontend sends: "price" (string from form — coerced to Number)
+//   category    → required ✅  frontend sends: "category"
+//   image       → NOT required (default: "")
+//   stock       → NOT required (default: 0)
+//   createdBy   → required ✅  set from req.user._id — NOT from frontend body
+// ─────────────────────────────────────────────────────────────────────────────
+
 // @route  POST /api/products
 // @access Private — Admin only
 const createProduct = async (req, res) => {
   try {
     const { name, description, price, category, image, stock } = req.body;
 
-    // Manual validation — gives clearer error than Mongoose default
+    // DEBUG LOG — shows exactly what the frontend sent
+    console.log("DEBUG: Attempting to save data:", JSON.stringify(req.body, null, 2));
+
+    // Manual validation before touching DB
     if (!name || !description || !price || !category) {
       return res.status(400).json({
         message: "Please provide name, description, price, and category",
-        received: { name, description, price, category }, // helps debug missing fields
+        received: { name, description, price, category },
       });
     }
 
-    // req.user is guaranteed by protect middleware — but log if missing
+    // Guard: req.user must exist (set by protect middleware)
     if (!req.user || !req.user._id) {
-      console.error("PRODUCT_CREATE_ERROR: req.user is missing — protect middleware may have failed");
+      console.error("PRODUCT_CREATE_ERROR: req.user missing — protect middleware failed");
       return res.status(401).json({ message: "Not authorized" });
     }
 
+    // await is present — Product.create() saves to MongoDB
     const product = await Product.create({
       name,
       description,
-      price: Number(price),       // ensure number — frontend may send string
+      price:     Number(price),      // coerce: form sends strings
       category,
-      image: image || "",
-      stock: Number(stock) || 0,  // ensure number
-      createdBy: req.user._id,
+      image:     image || "",
+      stock:     Number(stock) || 0, // coerce: form sends strings
+      createdBy: req.user._id,       // NOT from req.body — from JWT via protect middleware
     });
 
     res.status(201).json(product);
   } catch (error) {
-    // Full error log — shows Mongoose validation errors, cast errors, etc.
+    console.error("DEBUG: Save Failed! Error:", error);
     console.error("DATABASE_SAVE_ERROR:", JSON.stringify(error, null, 2));
     res.status(500).json({
       message: error.message,
-      // Send validation details to frontend in development
-      errors: error.errors
+      errors:  error.errors
         ? Object.fromEntries(
             Object.entries(error.errors).map(([k, v]) => [k, v.message])
           )
@@ -53,7 +67,7 @@ const getProducts = async (req, res) => {
     const products = await Product.find().sort({ createdAt: -1 });
     res.status(200).json(products);
   } catch (error) {
-    console.error("DATABASE_SAVE_ERROR:", JSON.stringify(error, null, 2));
+    console.error("DEBUG: Save Failed! Error:", error);
     res.status(500).json({ message: error.message });
   }
 };
@@ -68,7 +82,7 @@ const getProductById = async (req, res) => {
     }
     res.status(200).json(product);
   } catch (error) {
-    console.error("DATABASE_SAVE_ERROR:", JSON.stringify(error, null, 2));
+    console.error("DEBUG: Save Failed! Error:", error);
     res.status(500).json({ message: error.message });
   }
 };
@@ -77,11 +91,14 @@ const getProductById = async (req, res) => {
 // @access Private — Admin only
 const updateProduct = async (req, res) => {
   try {
-    // Coerce numeric fields in case frontend sends strings
-    const update = { ...req.body };
-    if (update.price !== undefined)  update.price  = Number(update.price);
-    if (update.stock !== undefined)  update.stock  = Number(update.stock);
+    console.log("DEBUG: Attempting to save data:", JSON.stringify(req.body, null, 2));
 
+    // Coerce numeric fields — form inputs arrive as strings
+    const update = { ...req.body };
+    if (update.price !== undefined) update.price = Number(update.price);
+    if (update.stock !== undefined) update.stock = Number(update.stock);
+
+    // await is present — findByIdAndUpdate saves to MongoDB
     const product = await Product.findByIdAndUpdate(
       req.params.id,
       update,
@@ -94,10 +111,11 @@ const updateProduct = async (req, res) => {
 
     res.status(200).json(product);
   } catch (error) {
+    console.error("DEBUG: Save Failed! Error:", error);
     console.error("DATABASE_SAVE_ERROR:", JSON.stringify(error, null, 2));
     res.status(500).json({
       message: error.message,
-      errors: error.errors
+      errors:  error.errors
         ? Object.fromEntries(
             Object.entries(error.errors).map(([k, v]) => [k, v.message])
           )
@@ -110,6 +128,7 @@ const updateProduct = async (req, res) => {
 // @access Private — Admin only
 const deleteProduct = async (req, res) => {
   try {
+    // await is present — findByIdAndDelete removes from MongoDB
     const product = await Product.findByIdAndDelete(req.params.id);
 
     if (!product) {
@@ -118,7 +137,7 @@ const deleteProduct = async (req, res) => {
 
     res.status(200).json({ message: "Product deleted successfully" });
   } catch (error) {
-    console.error("DATABASE_SAVE_ERROR:", JSON.stringify(error, null, 2));
+    console.error("DEBUG: Save Failed! Error:", error);
     res.status(500).json({ message: error.message });
   }
 };

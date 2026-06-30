@@ -14,6 +14,9 @@ const register = async (req, res) => {
   try {
     const { name, email, password } = req.body;
 
+    // DEBUG LOG — shows exactly what the frontend sent
+    console.log("DEBUG: Attempting to save data:", JSON.stringify(req.body, null, 2));
+
     if (!name || !email || !password) {
       return res.status(400).json({ message: "Please provide all fields" });
     }
@@ -23,17 +26,18 @@ const register = async (req, res) => {
       return res.status(400).json({ message: "User already exists" });
     }
 
-    // User.create triggers the pre-save hook which hashes the password
+    // await is present — User.create() triggers pre-save hook → password hashed
     const user = await User.create({ name, email, password });
 
     res.status(201).json({
-      _id: user._id,
-      name: user.name,
+      _id:   user._id,
+      name:  user.name,
       email: user.email,
-      role: user.role,
+      role:  user.role,
       token: generateToken(user._id),
     });
   } catch (error) {
+    console.error("DEBUG: Save Failed! Error:", error);
     console.error("DATABASE_SAVE_ERROR:", JSON.stringify(error, null, 2));
     res.status(500).json({ message: error.message });
   }
@@ -57,13 +61,14 @@ const login = async (req, res) => {
     }
 
     res.status(200).json({
-      _id: user._id,
-      name: user.name,
+      _id:   user._id,
+      name:  user.name,
       email: user.email,
-      role: user.role,
+      role:  user.role,
       token: generateToken(user._id),
     });
   } catch (error) {
+    console.error("DEBUG: Save Failed! Error:", error);
     console.error("DATABASE_SAVE_ERROR:", JSON.stringify(error, null, 2));
     res.status(500).json({ message: error.message });
   }
@@ -72,12 +77,12 @@ const login = async (req, res) => {
 // @route  GET /api/auth/profile
 // @access Private
 const getProfile = async (req, res) => {
-  // req.user is set by the protect middleware
+  // req.user is set by the protect middleware — no DB write here
   res.status(200).json({
-    _id: req.user._id,
-    name: req.user.name,
-    email: req.user.email,
-    role: req.user.role,
+    _id:       req.user._id,
+    name:      req.user.name,
+    email:     req.user.email,
+    role:      req.user.role,
     createdAt: req.user.createdAt,
   });
 };
