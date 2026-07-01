@@ -1,4 +1,4 @@
-const jwt  = require("jsonwebtoken");
+const jwt = require("jsonwebtoken");
 const User = require("../models/User");
 
 /**
@@ -23,48 +23,52 @@ const User = require("../models/User");
  *   No user   → 401
  */
 const protect = async (req, res, next) => {
-  let token;
-  let tokenSource = "";
+  // 1. Pehle Cookie check karo
+  let token = req.cookies.token; // Tumhari cookie ka naam 'token' hai
 
-  // ── 1. Check Authorization header (primary — localStorage Bearer token) ──
-  if (
-    req.headers.authorization &&
-    req.headers.authorization.startsWith("Bearer ")
-  ) {
-    token       = req.headers.authorization.split(" ")[1];
-    tokenSource = "Authorization header";
-  }
-  // ── 2. Fallback: httpOnly cookie (same name "token" as set in authController)
-  else if (req.cookies && req.cookies.token) {
-    token       = req.cookies.token;
-    tokenSource = "cookie";
+  // 2. Agar Cookie nahi hai, toh Header check karo (Backup)
+  if (!token && req.headers.authorization && req.headers.authorization.startsWith('Bearer')) {
+    token = req.headers.authorization.split(' ')[1];
   }
 
-  // ── 3. No token found ─────────────────────────────────────────────────────
   if (!token) {
-    console.log("[PROTECT] No token found — returning 401");
     return res.status(401).json({ message: "Not authorized, no token" });
   }
 
-  console.log(`[PROTECT] Token source: ${tokenSource}`);
-
   try {
-    // Verify signature + expiry
     const decoded = jwt.verify(token, process.env.JWT_SECRET);
-
-    // Fetch fresh from DB — ensures role/status changes take effect immediately
-    req.user   = await User.findById(decoded.id).select("-password");
-    req.userId = req.user?._id;
-
-    if (!req.user) {
-      return res.status(401).json({ message: "User not found" });
-    }
-
+    req.user = await User.findById(decoded.id);
     next();
   } catch (error) {
-    console.log("[PROTECT] Token verification failed:", error.message);
-    return res.status(401).json({ message: "Not authorized, token failed" });
+    res.status(401).json({ message: "Not authorized, token failed" });
   }
+};
+
+// ── 3. No token found ─────────────────────────────────────────────────────
+if (!token) {
+  console.log("[PROTECT] No token found — returning 401");
+  return res.status(401).json({ message: "Not authorized, no token" });
+}
+
+console.log(`[PROTECT] Token source: ${tokenSource}`);
+
+try {
+  // Verify signature + expiry
+  const decoded = jwt.verify(token, process.env.JWT_SECRET);
+
+  // Fetch fresh from DB — ensures role/status changes take effect immediately
+  req.user = await User.findById(decoded.id).select("-password");
+  req.userId = req.user?._id;
+
+  if (!req.user) {
+    return res.status(401).json({ message: "User not found" });
+  }
+
+  next();
+} catch (error) {
+  console.log("[PROTECT] Token verification failed:", error.message);
+  return res.status(401).json({ message: "Not authorized, token failed" });
+}
 };
 
 /**
