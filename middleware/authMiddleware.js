@@ -1,69 +1,75 @@
-const jwt = require("jsonwebtoken");
+const jwt  = require("jsonwebtoken");
 const User = require("../models/User");
 
 /**
  * protect — JWT verification middleware
  *
- * DATA FLOW:
- *   Client sends  →  Authorization: Bearer <token>  header  (primary)
- *                    OR  req.cookies.jwt  (fallback, if cookie auth is used)
- *   Middleware    →  jwt.verify(token, JWT_SECRET) → decoded { id }
- *                →  User.findById(decoded.id)      → req.user = user doc
- *                →  next()                          → controller runs
+ * TOKEN LOOKUP ORDER:
+ *   1. Authorization: Bearer <token>  header  (primary — localStorage flow)
+ *   2. req.cookies.token               (fallback — httpOnly cookie flow)
+ *
+ * Cookie name MUST match what authController sets: "token"
+ * (Not "jwt" — that was a mismatch that caused the cookie fallback to never work)
+ *
+ * FLOW:
+ *   Token found → jwt.verify() → decoded { id }
+ *              → User.findById(id) → req.user = full user doc (no password)
+ *              → req.userId = req.user._id (convenience alias)
+ *              → next() → controller runs
  *
  * ERRORS:
- *   No token   → 401 "Not authorized, no token"
- *   Bad token  → 401 "Not authorized, token failed"
- *   No user    → 401 "User not found"
- *
- * JWT payload is intentionally minimal: { id: user._id }
- * The full user document is fetched fresh from DB on every protected request
- * so role/status changes take effect immediately.
+ *   No token  → 401
+ *   Bad token → 401
+ *   No user   → 401
  */
 const protect = async (req, res, next) => {
   let token;
+  let tokenSource = "";
 
-  // 1. Check Authorization: Bearer <token> header (primary method)
+  // ── 1. Check Authorization header (primary — localStorage Bearer token) ──
   if (
     req.headers.authorization &&
     req.headers.authorization.startsWith("Bearer ")
   ) {
-    token = req.headers.authorization.split(" ")[1];
+    token       = req.headers.authorization.split(" ")[1];
+    tokenSource = "Authorization header";
   }
-  // 2. Fallback: cookie-based token (if cookie auth is also in use)
-  else if (req.cookies && req.cookies.jwt) {
-    token = req.cookies.jwt;
+  // ── 2. Fallback: httpOnly cookie (same name "token" as set in authController)
+  else if (req.cookies && req.cookies.token) {
+    token       = req.cookies.token;
+    tokenSource = "cookie";
   }
 
-  // 3. No token found at all
+  // ── 3. No token found ─────────────────────────────────────────────────────
   if (!token) {
+    console.log("[PROTECT] No token found — returning 401");
     return res.status(401).json({ message: "Not authorized, no token" });
   }
 
+  console.log(`[PROTECT] Token source: ${tokenSource}`);
+
   try {
-    // Verify signature + expiry — throws on failure
+    // Verify signature + expiry
     const decoded = jwt.verify(token, process.env.JWT_SECRET);
 
-    // Fetch user fresh from DB, exclude password
-    // req.user is now available in all downstream controllers
-    req.user = await User.findById(decoded.id).select("-password");
+    // Fetch fresh from DB — ensures role/status changes take effect immediately
+    req.user   = await User.findById(decoded.id).select("-password");
+    req.userId = req.user?._id;
 
     if (!req.user) {
       return res.status(401).json({ message: "User not found" });
     }
 
-    // Also expose req.userId as a convenience alias
-    req.userId = req.user._id;
-
     next();
   } catch (error) {
+    console.log("[PROTECT] Token verification failed:", error.message);
     return res.status(401).json({ message: "Not authorized, token failed" });
   }
 };
 
 /**
  * authorizeRoles(...roles) — role-based access control
- * Must be used AFTER protect (requires req.user to be set).
+ * Must be used AFTER protect (requires req.user).
  *
  * Usage: router.post("/", protect, authorizeRoles("admin"), createProduct)
  */

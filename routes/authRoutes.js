@@ -1,14 +1,15 @@
 const express = require("express");
-const router = express.Router();
+const router  = express.Router();
 
-const { register, login, getProfile } = require("../controllers/authController");
+const { register, login, getProfile, logout } = require("../controllers/authController");
 const { protect } = require("../middleware/authMiddleware");
 
 // Public routes
 router.post("/register", register);
-router.post("/login", login);
+router.post("/login",    login);
 
-// Private route — protect runs first, then getProfile
-router.get("/profile", protect, getProfile);
+// Private routes — protect middleware runs first
+router.get ("/profile",  protect, getProfile);
+router.post("/logout",   protect, logout);    // clears httpOnly cookie
 
 module.exports = router;
