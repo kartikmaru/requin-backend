@@ -1,8 +1,3 @@
 node_modules/
-
-# Local env file — never commit real secrets
 .env
 .env.local
-
-# Safe to commit — contains only placeholder values
-# !.env.example
